@@ -1,0 +1,94 @@
+{
+    "siteTitle": "Marketplace",
+    "navigation": {
+        "home": "Home",
+        "search": "Search",
+        "new": "New",
+        "preowned": "Preowned",
+        "signIn": "Sign in",
+        "signUp": "Sign up",
+        "contact": "Contact",
+        "forgotPassword": "Forgot password",
+        "login": "Login"
+    },
+    "pages": {
+        "indexPage": {
+            "title": "This is the index page",
+            "submitListing": "Submit Listing"
+        }
+    },
+    "components": {
+        "footer": {
+            "footer_welcome_message": "Welcome to our marketplace, a platform that connects sellers and buyers worldwide. Whether you're looking for unique products, specialized services, or want to sell your own creations, our marketplace is here to offer you a smooth and secure experience. Explore a wide range of categories, enjoy exclusive promotions, and join a growing community of merchants and customers.",
+            "company_section_title": "Company",
+            "company_about_us": "About Us",
+            "company_terms_conditions": "Terms & Conditions",
+            "company_privacy_policy": "Privacy Policy",
+            "company_contact_us": "Contact Us",
+            "blog_section_title": "Blog",
+            "blog_get_started": "How to Get Started with Our Marketplace",
+            "blog_selling_tips": "Tips for Selling Successfully Online",
+            "blog_seller_benefits": "The Advantages of Our Platform for Sellers",
+            "blog_transaction_security": "Guide to Securing Your Transactions",
+            "blog_see_more": "See More",
+            "connect_with_us_title": "Connect With Us",
+            "copyright": "Copyright © 2020 {{ displayYear }} - 2022 Winseslas. All Rights Reserved.",
+            "madeWithLove": "Made with ❤️ by Winseslas.",
+            "languageLabel": "Language:"
+        },
+        "hero": {
+            "title": "Find Your Perfect Car",
+            "subtitle": "Explore thousands of cars from trusted sellers",
+            "searchPlaceholder": "Search by make, model, or keyword",
+            "searchButton": "Search",
+            "featuredCategories": "Featured Categories",
+            "newCars": "New Cars",
+            "usedCars": "Used Cars",
+            "electricVehicles": "Electric Vehicles",
+            "luxuryCars": "Luxury Cars",
+            "viewAllListings": "View All Listings"
+        },
+        "search": {
+            "placeholderCars": "Cars",
+            "placeholderCarMakes": "Car Makes",
+            "placeholderPrice": "Price"
+        },
+        "categories": {
+            "title": "Categories",
+            "previous": "Previous",
+            "next": "Next"
+        },
+        "popularCars": {
+            "title": "Most Searched Cars",
+            "viewDetails": "View Details"
+        },
+        "testimonials": {
+            "title": "Read trusted reviews from our customers",
+            "name": "Name",
+            "rating": "Rating",
+            "comment": "Comment"
+        },
+        "infoSection": {
+            "title": "Rent your car with peace of mind with us!",
+            "image": {
+                "altText": "Car rental"
+            },
+            "content": {
+                "paragraph1": "At our car rental agency, renting a car is easy, fast and secure. Whether you're going on vacation, a business trip, or just need a temporary vehicle, we have what you need.",
+                "paragraph2": "Our wide range of vehicles, from economical city cars to spacious SUVs, is regularly maintained to ensure an optimal driving experience. Book your car in just a few clicks and enjoy a customer service available to accompany you throughout your rental."
+            }
+        }
+    },
+    "socialLinks": {
+        "github": "Github",
+        "facebook": "Facebook",
+        "x": "X",
+        "instagram": "Instagram",
+        "youtube": "Youtube"
+    },
+    "common": {
+        "error": "Error",
+        "errorMessage": "An error has occurred",
+        "successMessage": "Operation successful"
+    }
+}
