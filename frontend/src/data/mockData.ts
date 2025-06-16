@@ -1,4 +1,4 @@
-import { Manga, User, Review } from '../types';
+import type { Manga, User, Review } from '../types';
 
 export const mockMangas: Manga[] = [
   {
