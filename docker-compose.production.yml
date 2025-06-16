@@ -1,0 +1,228 @@
+
+# Configuration pour l'environnement de production
+
+services:
+  # Backend Django pour production
+  backend:
+    image: ghcr.io/${GITHUB_REPOSITORY}/backend:latest
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    environment:
+      - DEBUG=0
+      - ENVIRONMENT=production
+      - DATABASE_URL=${PRODUCTION_DATABASE_URL}
+      - REDIS_URL=${PRODUCTION_REDIS_URL}
+      - SECRET_KEY=${PRODUCTION_SECRET_KEY}
+      - ALLOWED_HOSTS=${PRODUCTION_DOMAIN}
+      - SENTRY_DSN=${PRODUCTION_SENTRY_DSN}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    
+  # Frontend React pour production
+  frontend:
+    image: ghcr.io/${GITHUB_REPOSITORY}/frontend:latest
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    environment:
+      - REACT_APP_API_URL=https://${PRODUCTION_DOMAIN}/api
+      - REACT_APP_ENVIRONMENT=production
+      - REACT_APP_SENTRY_DSN=${PRODUCTION_FRONTEND_SENTRY_DSN}
+      - REACT_APP_GOOGLE_ANALYTICS_ID=${GOOGLE_ANALYTICS_ID}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Base de données production (avec backup automatique)
+  db:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+      - POSTGRES_DB=${PRODUCTION_DB_NAME}
+      - POSTGRES_USER=${PRODUCTION_DB_USER}
+      - POSTGRES_PASSWORD=${PRODUCTION_DB_PASSWORD}
+    volumes:
+      - production_postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+    restart: unless-stopped
+
+  # Redis production avec persistence
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - production_redis_data:/data
+    restart: unless-stopped
+
+  # Nginx production avec SSL et optimisations
+  nginx:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    environment:
+      - DOMAIN=${PRODUCTION_DOMAIN}
+    volumes:
+      - ./nginx/production.conf:/etc/nginx/conf.d/default.conf
+      - ${SSL_CERT_PATH}:/etc/nginx/ssl/cert.pem:ro
+      - ${SSL_KEY_PATH}:/etc/nginx/ssl/key.pem:ro
+      - nginx_cache:/var/cache/nginx
+    restart: unless-stopped
+
+  # Backup automatique de la base de données
+  db-backup:
+    image: postgres:15
+    environment:
+      - PGPASSWORD=${PRODUCTION_DB_PASSWORD}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh
+    command: >
+      bash -c "
+        chmod +x /backup.sh &&
+        echo '0 2 * * * /backup.sh' | crontab - &&
+        crond -f
+      "
+    depends_on:
+      - db
+    networks:
+      - manga_network
+    restart: unless-stopped
+
+  # Monitoring avec Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: manga_prometheus_prod
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    volumes:
+      - ./monitoring/prometheus.production.yml:/etc/prometheus/prometheus.yml
+      - prometheus_production_data:/prometheus
+    networks:
+      - manga_network
+    restart: unless-stopped
+
+  # Grafana pour les métriques
+  grafana:
+    image: grafana/grafana:latest
+    container_name: manga_grafana_prod
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_production_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - manga_network
+    restart: unless-stopped
+
+  # Alertmanager pour les alertes
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: manga_alertmanager_prod
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    networks:
+      - manga_network
+    restart: unless-stopped
+
+  # Node Exporter pour métriques système
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: manga_node_exporter_prod
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - manga_network
+    restart: unless-stopped
+
+volumes:
+  production_postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/docker/volumes/manga_postgres_data
+  production_redis_data:
+  prometheus_production_data:
+  grafana_production_data:
+  alertmanager_data:
+  nginx_cache:

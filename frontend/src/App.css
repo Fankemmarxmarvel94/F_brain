@@ -1,5 +1,15 @@
-#root {
-  margin: 0 auto;
-  padding: 0rem;
-  /* background-color: #dcdfe4; */
+.App {
+  text-align: center;
+}
+
+.App-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
 }
