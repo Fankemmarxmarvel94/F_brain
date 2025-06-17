@@ -1,32 +1,34 @@
-# Version simplifiée pour éviter les erreurs npm
-FROM node:18-alpine as build
+# Dockerfile multi-stage pour React + Vite
 
+# Stage 1: Build de l'application
+FROM node:20-alpine AS build
+
+# Définir le répertoire de travail
 WORKDIR /app
 
-# Copie des fichiers package
-COPY package.json ./
+# Copier package.json et package-lock.json pour optimiser le cache Docker
+COPY package*.json ./
 
-# Installation des dépendances
-RUN npm install --legacy-peer-deps
+# Installer les dépendances (gestion avec/sans package-lock.json)
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Copie du code source
+# Copier tout le code source
 COPY . .
 
-# Build
+# Build de l'application pour la production
 RUN npm run build
 
-# Production
-FROM nginx:alpine as production
-RUN apk add --no-cache curl
-COPY --from=build /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Stage 2: Production avec nginx
+FROM nginx:alpine AS production
 
-# Développement
-FROM node:18-alpine as development
-WORKDIR /app
-COPY package.json ./
-RUN npm install --legacy-peer-deps
-EXPOSE 3000
-CMD ["npm", "start"]
+# Copier les fichiers buildés depuis le stage précédent
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copier la configuration nginx personnalisée
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Exposer le port 80
+EXPOSE 80
+
+# Démarrer nginx
+CMD ["nginx", "-g", "daemon off;"]
