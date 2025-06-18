@@ -1,50 +1,34 @@
-export interface Manga {
-  id: string;
+interface Manga {
+  id: number;
   title: string;
-  titleJapanese?: string;
   author: string;
-  artist?: string;
-  genres: string[];
-  status: 'En cours' | 'Terminé' | 'Hiatus' | 'Annulé';
-  volumes: number;
-  chapters: number;
-  year: number;
-  synopsis: string;
-  coverImage: string;
+  genre: string[];
+  status: 'En cours' | 'Terminé' | 'En pause';
   rating: number;
-  totalRatings: number;
-  demographics: 'Shōnen' | 'Shōjo' | 'Seinen' | 'Josei' | 'Kodomo';
-  publisher: string;
-  serialization?: string;
+  chapters: number;
+  description: string;
+  coverImage: string;
+  year: number;
 }
 
 export interface User {
-  id: string;
+  id: number;
   username: string;
   email: string;
-  avatar?: string;
-  favorites: string[];
-  readingList: string[];
-  joinedDate: Date;
 }
 
-export interface Review {
-  id: string;
-  mangaId: string;
-  userId: string;
-  username: string;
-  rating: number;
-  comment: string;
-  date: Date;
-  helpful: number;
+export interface AuthContextType {
+  user: User | null;
+  login: (username: string, password: string) => Promise<boolean>;
+  logout: () => void;
+  isLoading: boolean;
 }
 
-export interface FilterOptions {
-  genres: string[];
-  status: string[];
-  demographics: string[];
-  minRating: number;
-  yearRange: [number, number];
-  sortBy: 'title' | 'rating' | 'year' | 'popularity';
-  sortOrder: 'asc' | 'desc';
+export interface FavoritesContextType {
+  favorites: number[];
+  addToFavorites: (mangaId: number) => void;
+  removeFromFavorites: (mangaId: number) => void;
+  isFavorite: (mangaId: number) => boolean;
 }
+
+export type { Manga };

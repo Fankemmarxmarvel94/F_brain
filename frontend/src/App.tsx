@@ -1,47 +1,26 @@
-import React, { Component } from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import './App.css';
+import { useState } from "react";
+import { AuthProvider } from "./context/AuthContext";
+import { FavoritesProvider } from "./context/FavoritesContext";
+import Header from "./components/Header";
+import MangaPage from "./pages/MangaPage";
+import FavoritesPage from "./pages/FavoritesPage";
 
-// Import des layouts
-import RootLayout from './layouts/RootLayout';
+function App() {
+  const [activeTab, setActiveTab] = useState<"manga" | "favorites">("manga");
 
-// Import des pages
-import IndexPage from './pages/IndexPage';
-import ContactPage from './pages/ContactPage';
+  return (
+    <AuthProvider>
+      <FavoritesProvider>
+        <div className="min-h-screen bg-gray-50">
+          <Header activeTab={activeTab} onTabChange={setActiveTab} />
 
-// Définition des propriétés du composant App
-type AppProps = Record<string, never>; // Équivalent à {}
-
-type AppState = {
-  router: ReturnType<typeof createBrowserRouter>;
-};
-
-class App extends Component<AppProps, AppState> {
-  constructor(props: AppProps) {
-    super(props);
-    
-    this.state = {
-      router: createBrowserRouter([
-        {
-          element: <RootLayout />,
-          children: [
-            { path: '/', element: <IndexPage /> },
-            { path: '/contact', element: <ContactPage /> },
-          ],
-        },
-      ]),
-    };
-  }
-
-  render() {
-    return (
-      <React.StrictMode>
-        <React.Suspense fallback="Loading...">
-          <RouterProvider router={this.state.router} />
-        </React.Suspense>
-      </React.StrictMode>
-    );
-  }
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {activeTab === "manga" ? <MangaPage /> : <FavoritesPage />}
+          </main>
+        </div>
+      </FavoritesProvider>
+    </AuthProvider>
+  );
 }
 
 export default App;

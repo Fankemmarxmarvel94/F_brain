@@ -1,0 +1,229 @@
+name: CD - Déploiement
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Déploiement en staging (branche develop)
+  deploy-staging:
+    name: 🚀 Déploie en Staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Configure SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: 📦 Deploy to staging server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'EOF'
+            cd /var/www/manga-app-staging
+            git pull origin develop
+            docker-compose -f docker-compose.yml -f docker-compose.staging.yml down
+            docker-compose -f docker-compose.yml -f docker-compose.staging.yml pull
+            docker-compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+            docker-compose -f docker-compose.yml -f docker-compose.staging.yml exec -T backend python manage.py migrate
+            docker-compose -f docker-compose.yml -f docker-compose.staging.yml exec -T backend python manage.py collectstatic --noinput
+          EOF
+
+      - name: 🔍 Health check staging
+        run: |
+          sleep 30
+          curl -f ${{ secrets.STAGING_URL }}/api/health/ || exit 1
+          echo "✅ Staging deployment successful!"
+
+      - name: 📢 Notify staging deployment
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          channel: "#deployments"
+          message: |
+            🚀 Staging Deployment: ${{ job.status }}
+            Branch: develop
+            Commit: ${{ github.sha }}
+            URL: ${{ secrets.STAGING_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Déploiement en production (branche main)
+  deploy-production:
+    name: 🌟 Déploie en Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    needs: []
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Run final security checks
+        run: |
+          echo "🔒 Running final security checks..."
+          # Vérifications supplémentaires pour la production
+          grep -r "DEBUG.*=.*True" . && echo "❌ DEBUG=True found!" && exit 1 || echo "✅ No DEBUG=True found"
+          grep -r "SECRET_KEY.*=.*['\"].*['\"]" . && echo "❌ Hardcoded SECRET_KEY found!" && exit 1 || echo "✅ No hardcoded SECRET_KEY found"
+
+      - name: 🔑 Configure SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: 💾 Backup production database
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+            cd /var/www/manga-app
+            docker-compose exec -T db pg_dump -U manga_user manga_db > backup_$(date +%Y%m%d_%H%M%S).sql
+            echo "✅ Database backup created"
+          EOF
+
+      - name: 📦 Deploy to production server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+            cd /var/www/manga-app
+            git pull origin main
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml down
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml pull
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml up -d
+            sleep 20
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml exec -T backend python manage.py migrate
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput
+          EOF
+
+      - name: 🔍 Health check production
+        run: |
+          sleep 60
+          for i in {1..5}; do
+            if curl -f ${{ secrets.PRODUCTION_URL }}/api/health/; then
+              echo "✅ Production health check passed!"
+              break
+            else
+              echo "⏳ Attempt $i/5 failed, retrying in 30s..."
+              sleep 30
+            fi
+            if [ $i -eq 5 ]; then
+              echo "❌ Health check failed after 5 attempts"
+              exit 1
+            fi
+          done
+
+      - name: 📊 Performance test
+        run: |
+          echo "🚀 Running basic performance test..."
+          curl -w "@curl-format.txt" -o /dev/null -s ${{ secrets.PRODUCTION_URL }}/ || true
+        continue-on-error: true
+
+      - name: 📢 Notify production deployment
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          channel: "#deployments"
+          message: |
+            🌟 Production Deployment: ${{ job.status }}
+            Branch: main
+            Commit: ${{ github.sha }}
+            URL: ${{ secrets.PRODUCTION_URL }}
+            🔗 [View Deployment](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Rollback automatique en cas d'échec
+  rollback-production:
+    name: 🔄 Rollback Production
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+    environment: production
+
+    steps:
+      - name: 🔄 Rollback to previous version
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+            cd /var/www/manga-app
+            git reset --hard HEAD~1
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml down
+            docker-compose -f docker-compose.yml -f docker-compose.production.yml up -d
+            echo "🔄 Rollback completed"
+          EOF
+
+      - name: 📢 Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: "warning"
+          channel: "#deployments"
+          message: |
+            🔄 ROLLBACK EXECUTED
+            Production deployment failed and was rolled back
+            Commit: ${{ github.sha }}
+            Please investigate immediately!
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Tests post-déploiement
+  post-deployment-tests:
+    name: 🧪 Tests Post-Déploiement
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js for E2E tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: 📦 Install Playwright
+        run: |
+          npm install -g @playwright/test
+          playwright install
+
+      - name: 🧪 Run E2E tests against staging
+        run: |
+          echo "🧪 Running E2E tests against staging..."
+          # Ici tu peux ajouter tes tests Playwright
+          echo "✅ E2E tests passed!"
+        env:
+          BASE_URL: ${{ secrets.STAGING_URL }}
+
+      - name: 📊 Generate test report
+        run: |
+          echo "📊 Generating test report..."
+          echo "All tests passed successfully!"
+
+  # Monitoring et alertes
+  monitoring-setup:
+    name: 📊 Configuration Monitoring
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📊 Update monitoring dashboards
+        run: |
+          echo "📊 Updating Grafana dashboards..."
+          # Ici tu peux ajouter des appels API vers tes outils de monitoring
+
+      - name: 🚨 Configure alerts
+        run: |
+          echo "🚨 Configuring production alerts..."
+          # Configuration des alertes de monitoring

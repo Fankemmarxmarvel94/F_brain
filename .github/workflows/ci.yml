@@ -1,0 +1,276 @@
+name: CI - Tests et Qualité
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Tests Backend Django
+  backend-tests:
+    name: 🐍 Tests Backend Django
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_manga_db
+          POSTGRES_USER: manga_user
+          POSTGRES_PASSWORD: manga_pass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 📦 Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install coverage pytest-django pytest-cov
+
+      - name: 🔧 Configure Django settings
+        run: |
+          cd backend
+          export SECRET_KEY="test-secret-key"
+          export DATABASE_URL="postgresql://manga_user:manga_pass@localhost:5432/test_manga_db"
+          export REDIS_URL="redis://localhost:6379/0"
+
+      - name: 🗄️ Run database migrations
+        run: |
+          cd backend
+          python manage.py migrate
+        env:
+          SECRET_KEY: "test-secret-key"
+          DATABASE_URL: "postgresql://manga_user:manga_pass@localhost:5432/test_manga_db"
+          REDIS_URL: "redis://localhost:6379/0"
+          DEBUG: "False"
+
+      - name: 🧪 Run tests with coverage
+        run: |
+          cd backend
+          coverage run --source='.' manage.py test
+          coverage report --show-missing
+          coverage xml
+        env:
+          SECRET_KEY: "test-secret-key"
+          DATABASE_URL: "postgresql://manga_user:manga_pass@localhost:5432/test_manga_db"
+          REDIS_URL: "redis://localhost:6379/0"
+          DEBUG: "False"
+
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+
+      - name: 🔍 Lint avec flake8
+        run: |
+          cd backend
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # Tests Frontend React
+  frontend-tests:
+    name: ⚛️ Tests Frontend React
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 📦 Install dependencies
+        run: |
+          cd frontend
+          npm ci --legacy-peer-deps
+
+      - name: 🔍 Lint avec ESLint
+        run: |
+          cd frontend
+          npm run lint --if-present
+
+      - name: 🎨 Check formatting avec Prettier
+        run: |
+          cd frontend
+          npm run format:check --if-present || true
+
+      - name: 🏗️ Build application
+        run: |
+          cd frontend
+          npm run build
+        env:
+          REACT_APP_API_URL: http://localhost/api
+
+      - name: 🧪 Run tests
+        run: |
+          cd frontend
+          npm test -- --coverage --watchAll=false
+        env:
+          CI: true
+
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+
+  # Sécurité et vulnérabilités
+  security-scan:
+    name: 🔒 Analyse de sécurité
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+
+      - name: 📊 Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: "trivy-results.sarif"
+
+      - name: 🔐 Backend security check avec safety
+        run: |
+          cd backend
+          pip install safety
+          safety check --file requirements.txt
+
+      - name: 🔐 Frontend security check avec npm audit
+        run: |
+          cd frontend
+          npm audit --audit-level moderate
+
+  # Build des images Docker
+  docker-build:
+    name: 🐳 Build Images Docker
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📝 Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🏗️ Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 📝 Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🏗️ Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+
+  # Notification des résultats
+  notify:
+    name: 📢 Notifications
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, security-scan, docker-build]
+    if: always()
+
+    steps:
+      - name: 📢 Notify on success
+        if: ${{ needs.backend-tests.result == 'success' && needs.frontend-tests.result == 'success' }}
+        run: |
+          echo "✅ Tous les tests sont passés avec succès!"
+          echo "🐳 Images Docker buildées et poussées"
+          echo "🔒 Analyse de sécurité terminée"
+
+      - name: 📢 Notify on failure
+        if: ${{ needs.backend-tests.result == 'failure' || needs.frontend-tests.result == 'failure' }}
+        run: |
+          echo "❌ Échec des tests détecté"
+          echo "Backend: ${{ needs.backend-tests.result }}"
+          echo "Frontend: ${{ needs.frontend-tests.result }}"
+          exit 1
